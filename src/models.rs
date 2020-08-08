@@ -1,6 +1,4 @@
-use chrono::NaiveDateTime; 
-use serde::{Deserialize, Serialize};
-
+use serde::{Serialize};
 use crate::schema::editors;
 
 #[derive(Debug, Clone, Serialize, Queryable, Insertable)]
