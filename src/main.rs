@@ -8,6 +8,7 @@ use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use bcrypt::{DEFAULT_COST, hash, verify};
 mod editors;
+mod articles;
 mod schema;
 mod models;
 mod payloads;
@@ -40,10 +41,17 @@ async fn main() -> std::io::Result<()> {
                 )
             )
             .wrap(middleware::Logger::default())
-            .service(web::resource("/user/{user_id}").route(web::get().to(get_editor)))
-            .service(web::resource("/user").route(web::post().to(add_editor)))
-            .service(web::resource("/login").route(web::post().to(login)))
-            .service(web::resource("/update").route(web::post().to(update_password)))
+            .service(
+                web::scope("/user")
+                    .service(web::resource("/get/{user_id}").route(web::get().to(get_editor)))
+                    .service(web::resource("/add").route(web::post().to(add_editor)))
+                    .service(web::resource("/login").route(web::post().to(login)))
+                    .service(web::resource("/update").route(web::post().to(update_password)))
+            )
+            .service(
+                web::scope("/article")
+                    .service(web::resource("/add").route(web::post().to(create_article)))
+            )
     })
     .bind(&bind)?
     .run()
@@ -106,15 +114,6 @@ async fn login(
     }
 }
 
-async fn check(id: Identity) ->Result<HttpResponse, Error> {
-    if let Some(editor_id) = id.identity() {
-        id.remember(editor_id.clone());
-        Ok(HttpResponse::Ok().body(format!("Welcome! {}", editor_id)))
-    } else {
-        Ok(HttpResponse::Forbidden().finish())
-    }
-}
-
 async fn add_editor(
     pool: web::Data<DbPool>,
     info: web::Json<payloads::CreateEditorReq>) -> Result<HttpResponse, Error> {
@@ -166,7 +165,7 @@ async fn update_password(
         let valid = verify(inner.password, &hashed_pass).expect("verify faild.");
         if valid {
             let hashed_pass_again = hash(inner.password_again,DEFAULT_COST).expect("password_again hash failed");
-            let result = web::block(move || editors::update_password(id_clone,hashed_pass_again,&conn))
+            web::block(move || editors::update_password(id_clone,hashed_pass_again,&conn))
                 .await
                 .map_err(|e| {
                     eprintln!("{}", e);
@@ -177,6 +176,85 @@ async fn update_password(
             auth_id.forget();
             Ok(HttpResponse::Unauthorized().finish())
         }            
+    } else {
+        let res = HttpResponse::NotFound() 
+            .body(format!("No user found with uid"));
+        Ok(res)
+    }
+}
+
+async fn create_article(
+    pool: web::Data<DbPool>,
+    auth_id: Identity,
+    create_req: web::Json<payloads::CreateArticleReq>) -> Result<HttpResponse, Error> {
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    let inner = create_req.into_inner();
+    let mut id = String::from("");
+    //sessionからeditor_idを取得
+    if let Some(editor_id) = auth_id.identity() {
+        auth_id.remember(editor_id.clone());
+        id = editor_id.clone();
+    } else {
+        auth_id.forget();
+       return Ok(HttpResponse::Unauthorized().finish());
+    }
+    let editor = web::block(move || editors::find_editor(id, &conn))
+        .await 
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+
+    let mut editor_id;
+    if let Some(editor) = editor {
+        editor_id = editor.editor_id;
+    } else {
+        return Ok(HttpResponse::NotFound().finish())
+    }
+    let add_data = payloads::CreateArticleDbReq{
+        author_id : editor_id,
+        title : inner.title,
+        content : inner.content,
+    };    
+    
+    // use web::block to offload blocking Diesel code without blocking server thread
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    web::block(move || articles::add_article(add_data, &conn))
+        .await
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+
+    Ok(HttpResponse::Created().finish())
+}
+
+async fn get_article_list(
+    pool: web::Data<DbPool>,
+    auth_id: Identity,
+) -> Result<HttpResponse, Error> {
+    //コネクションプール取得
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    //idを変数に格納
+    let mut id = String::from("");
+    //sessionからeditor_idを取得
+    if let Some(editor_id) = auth_id.identity() {
+        auth_id.remember(editor_id.clone());
+        id = editor_id.clone();
+    } else {
+        auth_id.forget();
+       return Ok(HttpResponse::Unauthorized().finish());
+    }
+    let  = web::block(move || editors::find_editor(id, &conn))
+        .await 
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+
+    //エディターが存在する場合はそれを返す
+    if let Some(editor) = editor {
+        Ok(HttpResponse::Ok().json(editor))
     } else {
         let res = HttpResponse::NotFound() 
             .body(format!("No user found with uid"));
