@@ -14,5 +14,5 @@ pub struct Article {
     pub id: i64,
     pub author_id: i64,
     pub title: String,
-    pub content: String,
+    pub content: Option<String>,
 }

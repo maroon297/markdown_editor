@@ -12,6 +12,7 @@ mod articles;
 mod schema;
 mod models;
 mod payloads;
+mod responses;
 
 type DbPool = r2d2::Pool<ConnectionManager<MysqlConnection>>;
 
@@ -51,6 +52,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/article")
                     .service(web::resource("/add").route(web::post().to(create_article)))
+                    .service(web::resource("/titles").route(web::get().to(get_title_list)))
             )
     })
     .bind(&bind)?
@@ -142,15 +144,14 @@ async fn update_password(
     update_req: web::Json<payloads::UpdatePasswordReq>) -> Result<HttpResponse, Error> {
     let conn = pool.get().expect("couldn't get db connection from pool");
     let inner = update_req.into_inner();
-    let mut id = String::from("");
     //sessionからeditor_idを取得
-    if let Some(editor_id) = auth_id.identity() {
+    let id = if let Some(editor_id) = auth_id.identity() {
         auth_id.remember(editor_id.clone());
-        id = editor_id.clone();
+        editor_id.clone()
     } else {
         auth_id.forget();
        return Ok(HttpResponse::Unauthorized().finish());
-    }
+    };
     let id_clone = id.clone();
     let editor = web::block(move || editors::find_editor(id.clone(), &conn))
         .await
@@ -189,15 +190,14 @@ async fn create_article(
     create_req: web::Json<payloads::CreateArticleReq>) -> Result<HttpResponse, Error> {
     let conn = pool.get().expect("couldn't get db connection from pool");
     let inner = create_req.into_inner();
-    let mut id = String::from("");
     //sessionからeditor_idを取得
-    if let Some(editor_id) = auth_id.identity() {
+    let id = if let Some(editor_id) = auth_id.identity() {
         auth_id.remember(editor_id.clone());
-        id = editor_id.clone();
+        editor_id.clone()
     } else {
         auth_id.forget();
        return Ok(HttpResponse::Unauthorized().finish());
-    }
+    };
     let editor = web::block(move || editors::find_editor(id, &conn))
         .await 
         .map_err(|e| {
@@ -205,12 +205,11 @@ async fn create_article(
             HttpResponse::InternalServerError().finish()
         })?;
 
-    let mut editor_id;
-    if let Some(editor) = editor {
-        editor_id = editor.editor_id;
+    let editor_id = if let Some(editor) = editor {
+        editor.editor_id
     } else {
         return Ok(HttpResponse::NotFound().finish())
-    }
+    };
     let add_data = payloads::CreateArticleDbReq{
         author_id : editor_id,
         title : inner.title,
@@ -229,35 +228,50 @@ async fn create_article(
     Ok(HttpResponse::Created().finish())
 }
 
-async fn get_article_list(
+async fn get_title_list(
     pool: web::Data<DbPool>,
     auth_id: Identity,
 ) -> Result<HttpResponse, Error> {
     //コネクションプール取得
     let conn = pool.get().expect("couldn't get db connection from pool");
-    //idを変数に格納
-    let mut id = String::from("");
     //sessionからeditor_idを取得
-    if let Some(editor_id) = auth_id.identity() {
+    let id = if let Some(editor_id) = auth_id.identity() {
         auth_id.remember(editor_id.clone());
-        id = editor_id.clone();
+        editor_id.clone()
     } else {
         auth_id.forget();
        return Ok(HttpResponse::Unauthorized().finish());
-    }
-    let  = web::block(move || editors::find_editor(id, &conn))
+    };
+    let editor_res = web::block(move || editors::find_editor(id, &conn))
         .await 
         .map_err(|e| {
             eprintln!("{}", e);
             HttpResponse::InternalServerError().finish()
         })?;
-
-    //エディターが存在する場合はそれを返す
-    if let Some(editor) = editor {
-        Ok(HttpResponse::Ok().json(editor))
+    
+    let author_id = if let Some(editor) = editor_res {
+        editor.editor_id
     } else {
         let res = HttpResponse::NotFound() 
             .body(format!("No user found with uid"));
-        Ok(res)
+        return Ok(res)
+    };
+
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    let titles_res = web::block(move || articles::get_titles(author_id, &conn))
+        .await 
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+    let mut res_list: Vec<responses::TitlesRes> = Vec::new();
+    for title in titles_res {
+        res_list.push(
+            responses::TitlesRes {
+                article_id : title.id,
+                title : title.title,
+            }
+        );
     }
+    Ok(HttpResponse::Ok().json(res_list))
 }

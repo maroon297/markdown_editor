@@ -1,5 +1,6 @@
 use diesel::prelude::*;
 
+use crate::models;
 use crate::payloads;
 
 pub fn add_article(
@@ -14,4 +15,16 @@ pub fn add_article(
         content.eq(&req_article.content))
     ).execute(conn)?;    
     Ok(true)
+}
+
+pub fn get_titles(
+    req_editor_id : i64,
+    conn: &MysqlConnection
+) -> Result<Vec<models::Article>,diesel::result::Error> {
+    use crate::schema::articles::dsl::*;
+    let articles_vec = articles
+        .filter(author_id.eq(req_editor_id))
+        .load::<models::Article>(conn)
+        .expect("Error loading posts");
+    Ok(articles_vec)
 }
