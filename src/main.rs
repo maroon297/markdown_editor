@@ -53,6 +53,7 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/article")
                     .service(web::resource("/add").route(web::post().to(create_article)))
                     .service(web::resource("/titles").route(web::get().to(get_title_list)))
+                    .service(web::resource("/get/{article_id}").route(web::get().to(get_article)))
             )
     })
     .bind(&bind)?
@@ -274,4 +275,38 @@ async fn get_title_list(
         );
     }
     Ok(HttpResponse::Ok().json(res_list))
+}
+
+// 記事情報取得
+async fn get_article(
+    pool: web::Data<DbPool>,
+    article_id: web::Path<i64>,
+    auth_id: Identity,
+) -> Result<HttpResponse, Error> {
+    //sessionからeditor_idを取得
+    if let Some(editor_id) = auth_id.identity() {
+        auth_id.remember(editor_id.clone());
+    } else {
+        auth_id.forget();
+       return Ok(HttpResponse::Unauthorized().finish());
+    };
+    //コネクションプール取得
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    //idを変数に格納
+    let id = article_id.into_inner();
+    let article = web::block(move || articles::find_article(id, &conn))
+        .await 
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+
+    //エディターが存在する場合はそれを返す
+    if let Some(article) = article {
+        Ok(HttpResponse::Ok().json(article))
+    } else {
+        let res = HttpResponse::NotFound() 
+            .body(format!("No user found with uid"));
+        Ok(res)
+    }
 }

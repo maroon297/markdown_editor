@@ -28,3 +28,15 @@ pub fn get_titles(
         .expect("Error loading posts");
     Ok(articles_vec)
 }
+
+pub fn find_article(
+    article_id : i64,
+    conn: &MysqlConnection
+) -> Result<Option<models::Article>,diesel::result::Error> {
+    use crate::schema::articles::dsl::*;
+    let article = articles
+        .filter(id.eq(article_id))
+        .first::<models::Article>(conn)
+        .optional()?;
+    Ok(article)
+}
