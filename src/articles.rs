@@ -40,3 +40,20 @@ pub fn find_article(
         .optional()?;
     Ok(article)
 }
+
+pub fn update_article(
+    article_id: i64,
+    article_title : String,
+    article_content : String,
+    conn: &MysqlConnection
+) -> Result<bool,diesel::result::Error> {
+    use crate::schema::articles::dsl::*;
+
+    let target = articles.filter(id.eq(article_id));
+    diesel::update(target)
+        .set((
+            title.eq(article_title),
+            content.eq(article_content),))
+        .execute(conn)?;
+    Ok(true)
+}

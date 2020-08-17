@@ -47,13 +47,14 @@ async fn main() -> std::io::Result<()> {
                     .service(web::resource("/get/{user_id}").route(web::get().to(get_editor)))
                     .service(web::resource("/add").route(web::post().to(add_editor)))
                     .service(web::resource("/login").route(web::post().to(login)))
-                    .service(web::resource("/update").route(web::post().to(update_password)))
+                    .service(web::resource("/update").route(web::put().to(update_password)))
             )
             .service(
                 web::scope("/article")
                     .service(web::resource("/add").route(web::post().to(create_article)))
                     .service(web::resource("/titles").route(web::get().to(get_title_list)))
                     .service(web::resource("/get/{article_id}").route(web::get().to(get_article)))
+                    .service(web::resource("/update").route(web::put().to(update_article)))
             )
     })
     .bind(&bind)?
@@ -309,4 +310,26 @@ async fn get_article(
             .body(format!("No user found with uid"));
         Ok(res)
     }
+}
+
+async fn update_article(
+    pool: web::Data<DbPool>,
+    auth_id: Identity,
+    update_req: web::Json<payloads::UpdateArticleReq>) -> Result<HttpResponse, Error> {
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    let inner = update_req.into_inner();
+    //sessionからeditor_idを取得
+    if let Some(editor_id) = auth_id.identity() {
+        auth_id.remember(editor_id.clone());
+    } else {
+        auth_id.forget();
+       return Ok(HttpResponse::Unauthorized().finish());
+    };
+    web::block(move || articles::update_article(inner.id,inner.title,inner.content,&conn))
+        .await
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+    Ok(HttpResponse::NoContent().finish())
 }
