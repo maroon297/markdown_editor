@@ -57,3 +57,14 @@ pub fn update_article(
         .execute(conn)?;
     Ok(true)
 }
+
+pub fn delete_article(
+    article_id: i64,
+    conn: &MysqlConnection
+) -> Result<bool,diesel::result::Error> {
+    use crate::schema::articles::dsl::*;
+
+    let target = articles.filter(id.eq(article_id));
+    diesel::delete(target).execute(conn)?;
+    Ok(true)
+}

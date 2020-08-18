@@ -55,6 +55,7 @@ async fn main() -> std::io::Result<()> {
                     .service(web::resource("/titles").route(web::get().to(get_title_list)))
                     .service(web::resource("/get/{article_id}").route(web::get().to(get_article)))
                     .service(web::resource("/update").route(web::put().to(update_article)))
+                    .service(web::resource("/delete").route(web::post().to(delete_article)))
             )
     })
     .bind(&bind)?
@@ -326,6 +327,28 @@ async fn update_article(
        return Ok(HttpResponse::Unauthorized().finish());
     };
     web::block(move || articles::update_article(inner.id,inner.title,inner.content,&conn))
+        .await
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+async fn delete_article(
+    pool: web::Data<DbPool>,
+    auth_id: Identity,
+    delete_req: web::Json<payloads::DeleteArticleReq>) -> Result<HttpResponse, Error> {
+    let conn = pool.get().expect("couldn't get db connection from pool");
+    let inner = delete_req.into_inner();
+    //sessionからeditor_idを取得
+    if let Some(editor_id) = auth_id.identity() {
+        auth_id.remember(editor_id.clone());
+    } else {
+        auth_id.forget();
+       return Ok(HttpResponse::Unauthorized().finish());
+    };
+    web::block(move || articles::delete_article(inner.id,&conn))
         .await
         .map_err(|e| {
             eprintln!("{}", e);

@@ -37,3 +37,8 @@ pub struct UpdateArticleReq {
     pub title: String,
     pub content: String,
 }
+
+#[derive(Deserialize)]
+pub struct DeleteArticleReq {
+    pub id: i64,
+}
